@@ -11,8 +11,9 @@ LOG_FORMAT = "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
 
 def configure_logging(level: str = "INFO") -> None:
 	"""Configure VoiceFlow's console logger without duplicating handlers."""
-	numeric_level = logging.getLevelName(level.upper())
-	if not isinstance(numeric_level, int):
+	mapping = logging._nameToLevel
+	numeric_level = mapping.get(level.upper())
+	if numeric_level is None:
 		raise ValueError(f"Unknown logging level: {level!r}.")
 
 	logger = logging.getLogger("voiceflow")
