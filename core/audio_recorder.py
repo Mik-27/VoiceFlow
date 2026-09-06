@@ -39,6 +39,7 @@ class AudioRecorder:
 		)
 		self._stream_factory = stream_factory or sd.RawInputStream
 		self._buffer = bytearray()
+		self._chunk_callbacks: list[Callable[[bytes], None]] = []
 		self._stream: Any | None = None
 		self._recording = False
 		self._lock = threading.RLock()
@@ -107,6 +108,18 @@ class AudioRecorder:
 		with self._lock:
 			return bytes(self._buffer)
 
+	def add_chunk_callback(self, callback: Callable[[bytes], None]) -> Callable[[], None]:
+		"""Register a callback for live audio chunks and return an unregister function."""
+		with self._lock:
+			self._chunk_callbacks.append(callback)
+
+		def remove_callback() -> None:
+			with self._lock:
+				if callback in self._chunk_callbacks:
+					self._chunk_callbacks.remove(callback)
+
+		return remove_callback
+
 	def _on_audio(self, indata: Any, frames: int, _time: Any, status: Any) -> None:
 		if status:
 			self._logger.warning("Audio input status: %s", status)
@@ -120,5 +133,12 @@ class AudioRecorder:
 			if len(chunk) > remaining_capacity:
 				self._buffer.extend(chunk[:remaining_capacity])
 				self._logger.warning("Maximum recording duration reached; dropping later samples.")
-				return
-			self._buffer.extend(chunk)
+			else:
+				self._buffer.extend(chunk)
+			callbacks = tuple(self._chunk_callbacks)
+
+		for cb in callbacks:
+			try:
+				cb(chunk)
+			except Exception:
+				self._logger.exception("Audio chunk callback failed.")

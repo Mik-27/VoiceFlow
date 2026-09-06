@@ -45,7 +45,11 @@ class Settings:
 	stt_backend: str
 	llm_backend: str
 	llm_timeout_seconds: float
-	log_level: str
+	whisper_model_size: str = "small.en"
+	whisper_device: str = "auto"
+	whisper_compute_type: str = "auto"
+	ollama_model: str = "llama3.2:1b"
+	log_level: str = "INFO"
 
 	def __post_init__(self) -> None:
 		if self.hotkey_mode not in {"push_to_talk", "toggle"}:
@@ -67,7 +71,7 @@ class Settings:
 def load_settings() -> Settings:
 	"""Load settings from ``VOICEFLOW_*`` environment variables."""
 	return Settings(
-		hotkey=os.getenv("VOICEFLOW_HOTKEY", "<ctrl>+<alt>+space"),
+		hotkey=os.getenv("VOICEFLOW_HOTKEY", "<ctrl>+<alt>+<space>"),
 		hotkey_mode=os.getenv("VOICEFLOW_HOTKEY_MODE", "push_to_talk").lower(),
 		sample_rate=_environment_int("VOICEFLOW_SAMPLE_RATE", 16_000),
 		channels=_environment_int("VOICEFLOW_CHANNELS", 1),
@@ -78,6 +82,10 @@ def load_settings() -> Settings:
 		stt_backend=os.getenv("VOICEFLOW_STT_BACKEND", "mock"),
 		llm_backend=os.getenv("VOICEFLOW_LLM_BACKEND", "mock"),
 		llm_timeout_seconds=_environment_float("VOICEFLOW_LLM_TIMEOUT_SECONDS", 5.0),
+		whisper_model_size=os.getenv("VOICEFLOW_WHISPER_MODEL", "small.en"),
+		whisper_device=os.getenv("VOICEFLOW_WHISPER_DEVICE", "auto"),
+		whisper_compute_type=os.getenv("VOICEFLOW_WHISPER_COMPUTE_TYPE", "auto"),
+		ollama_model=os.getenv("VOICEFLOW_OLLAMA_MODEL", "llama3.2:1b"),
 		log_level=os.getenv("VOICEFLOW_LOG_LEVEL", "INFO").upper(),
 	)
 

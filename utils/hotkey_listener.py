@@ -36,15 +36,12 @@ class HotkeyListener:
 		if mode not in {"push_to_talk", "toggle"}:
 			raise ValueError("mode must be 'push_to_talk' or 'toggle'.")
 
-		try:
-			self._hotkey_keys = frozenset(keyboard.HotKey.parse(hotkey))
-		except (KeyError, ValueError) as error:
-			raise ValueError(f"Invalid hotkey: {hotkey!r}.") from error
-
-		if not self._hotkey_keys:
+		parsed_keys = self._parse_hotkey_spec(hotkey)
+		if not parsed_keys:
 			raise ValueError("hotkey must contain at least one key.")
 
 		self._hotkey = hotkey
+		self._hotkey_keys = parsed_keys
 		self._mode = mode
 		self._listener_factory = listener_factory or keyboard.Listener
 		self._callbacks: list[HotkeyCallback] = []
@@ -135,6 +132,25 @@ class HotkeyListener:
 			):
 				self._active = False
 				self._event_queue.put(HotkeyEvent.ON_RELEASE)
+
+	@classmethod
+	def _parse_hotkey_spec(cls, hotkey: str) -> frozenset[Any]:
+		"""Parse hotkey string normalizing common key names like ctrl or space."""
+		tokens = [t.strip() for t in hotkey.split("+") if t.strip()]
+		normalized_tokens = []
+		special_keys = {"ctrl", "alt", "shift", "cmd", "space", "enter", "tab", "esc", "backspace"}
+		for token in tokens:
+			t_lower = token.lower()
+			if t_lower in special_keys and not (token.startswith("<") and token.endswith(">")):
+				normalized_tokens.append(f"<{t_lower}>")
+			else:
+				normalized_tokens.append(token)
+		normalized_spec = "+".join(normalized_tokens)
+
+		try:
+			return frozenset(keyboard.HotKey.parse(normalized_spec))
+		except (KeyError, ValueError) as error:
+			raise ValueError(f"Invalid hotkey: {hotkey!r}.") from error
 
 	@staticmethod
 	def _canonical_key(key: Any) -> Any:
