@@ -108,6 +108,13 @@ class AudioRecorder:
 		with self._lock:
 			return bytes(self._buffer)
 
+	def extract_and_clear_buffer(self) -> bytes:
+		"""Extract buffered PCM audio and reset the buffer for the next chunk."""
+		with self._lock:
+			audio = bytes(self._buffer)
+			self._buffer.clear()
+			return audio
+
 	def add_chunk_callback(self, callback: Callable[[bytes], None]) -> Callable[[], None]:
 		"""Register a callback for live audio chunks and return an unregister function."""
 		with self._lock:

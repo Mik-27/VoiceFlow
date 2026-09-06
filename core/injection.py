@@ -74,6 +74,19 @@ class TextInjector:
 					except Exception:
 						self._logger.exception("Unable to restore the previous clipboard text.")
 
+	def type_text(self, text: str) -> None:
+		"""Directly type characters at the active cursor position in real-time."""
+		if not isinstance(text, str):
+			raise TypeError("text must be a string.")
+		if not text:
+			return
+
+		with self._lock:
+			try:
+				self._key_controller.type(text)
+			except Exception:
+				self._logger.exception("Failed to type streamed text.")
+
 	def _paste(self) -> None:
 		self._key_controller.press(keyboard.Key.ctrl)
 		try:

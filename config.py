@@ -45,6 +45,8 @@ class Settings:
 	stt_backend: str
 	llm_backend: str
 	llm_timeout_seconds: float
+	dictation_mode: str = "streaming"
+	pause_threshold_ms: int = 700
 	whisper_model_size: str = "small.en"
 	whisper_device: str = "auto"
 	whisper_compute_type: str = "auto"
@@ -54,6 +56,8 @@ class Settings:
 	def __post_init__(self) -> None:
 		if self.hotkey_mode not in {"push_to_talk", "toggle"}:
 			raise ValueError("hotkey_mode must be 'push_to_talk' or 'toggle'.")
+		if self.dictation_mode not in {"streaming", "batch"}:
+			raise ValueError("dictation_mode must be 'streaming' or 'batch'.")
 		if not self.hotkey.strip():
 			raise ValueError("hotkey must not be empty.")
 		if self.sample_rate <= 0 or self.channels <= 0:
@@ -66,6 +70,8 @@ class Settings:
 			raise ValueError("VAD settings cannot be negative.")
 		if self.llm_timeout_seconds <= 0:
 			raise ValueError("llm_timeout_seconds must be positive.")
+		if self.pause_threshold_ms <= 0:
+			raise ValueError("pause_threshold_ms must be positive.")
 
 
 def load_settings() -> Settings:
@@ -73,6 +79,8 @@ def load_settings() -> Settings:
 	return Settings(
 		hotkey=os.getenv("VOICEFLOW_HOTKEY", "<ctrl>+<alt>+<space>"),
 		hotkey_mode=os.getenv("VOICEFLOW_HOTKEY_MODE", "push_to_talk").lower(),
+		dictation_mode=os.getenv("VOICEFLOW_DICTATION_MODE", "streaming").lower(),
+		pause_threshold_ms=_environment_int("VOICEFLOW_PAUSE_THRESHOLD_MS", 700),
 		sample_rate=_environment_int("VOICEFLOW_SAMPLE_RATE", 16_000),
 		channels=_environment_int("VOICEFLOW_CHANNELS", 1),
 		audio_block_duration_ms=_environment_int("VOICEFLOW_AUDIO_BLOCK_MS", 30),

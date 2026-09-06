@@ -73,7 +73,10 @@ class VoiceFlowApp:
 		)
 
 		self._pipeline_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="voiceflow-pipeline")
+		self._streaming_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="voiceflow-stream")
 		self._lock = threading.RLock()
+		self._streaming_lock = threading.Lock()
+		self._has_typed_any_phrase = False
 		self._running = False
 		self._remove_callbacks: list[tuple[str, object]] = []
 
@@ -83,6 +86,7 @@ class VoiceFlowApp:
 		"""Connect audio, VAD, hotkey, and state machine event handlers."""
 		self.hotkey_listener.add_callback(self._on_hotkey_event)
 		self.recorder.add_chunk_callback(self._on_audio_chunk)
+		self.vad.add_pause_callback(self._on_vad_pause)
 		self.vad.add_endpoint_callback(self._on_vad_endpoint)
 
 	def start(self) -> None:
@@ -112,6 +116,7 @@ class VoiceFlowApp:
 			except Exception:
 				pass
 		self.state_machine.cancel()
+		self._streaming_executor.shutdown(wait=False, cancel_futures=True)
 		self._pipeline_executor.shutdown(wait=False, cancel_futures=True)
 		self.logger.info("VoiceFlow stopped.")
 
@@ -127,6 +132,67 @@ class VoiceFlowApp:
 		if self.state_machine.state is PipelineState.RECORDING:
 			self.vad.process(chunk)
 
+	def _on_vad_pause(self, result: VADResult) -> None:
+		"""Trigger incremental phrase processing on natural speech pauses in streaming mode."""
+		if self.settings.dictation_mode == "streaming" and self.state_machine.state is PipelineState.RECORDING:
+			self._streaming_executor.submit(self._process_phrase_chunk)
+
+	def _process_phrase_chunk(self) -> None:
+		"""Process an individual spoken phrase chunk with STT and LLM cleanup in real time."""
+		if self.state_machine.state is not PipelineState.RECORDING:
+			return
+
+		with self._streaming_lock:
+			if self.state_machine.state is not PipelineState.RECORDING:
+				return
+
+			# Extract only the audio for this phrase and reset recorder buffer
+			phrase_audio = self.recorder.extract_and_clear_buffer()
+			self.vad.reset_phrase()
+
+			# Need at least 0.3s of audio to be a meaningful phrase
+			min_samples = int(self.settings.sample_rate * 2 * 0.3)
+			if len(phrase_audio) < min_samples:
+				return
+
+			try:
+				raw_phrase = self.stt_engine.transcribe(phrase_audio).strip()
+			except Exception:
+				self.logger.debug("Phrase transcription error (ignored).")
+				return
+
+			if not raw_phrase:
+				return
+
+			self.logger.info("Live phrase raw STT: %r", raw_phrase)
+
+			# Fast LLM cleaning on the single phrase
+			cleaned_phrase = self._clean_phrase_with_fallback(raw_phrase)
+			if cleaned_phrase:
+				prefix = " " if self._has_typed_any_phrase else ""
+				to_type = prefix + cleaned_phrase
+				self.logger.info("Real-time typing phrase: %r", to_type)
+				self.injector.type_text(to_type)
+				self._has_typed_any_phrase = True
+
+	def _clean_phrase_with_fallback(self, raw_text: str) -> str:
+		"""Fast LLM cleanup of an individual phrase with graceful fallback."""
+		def _collect_tokens() -> str:
+			chunks = list(self.llm_cleaner.clean_stream(raw_text))
+			return "".join(chunks).strip()
+
+		cleanup_executor = ThreadPoolExecutor(max_workers=1)
+		try:
+			future = cleanup_executor.submit(_collect_tokens)
+			cleaned = future.result(timeout=self.settings.llm_timeout_seconds)
+			if cleaned:
+				return cleaned
+			return raw_text
+		except Exception:
+			return raw_text
+		finally:
+			cleanup_executor.shutdown(wait=False, cancel_futures=True)
+
 	def _on_vad_endpoint(self, result: VADResult) -> None:
 		"""Automatically trigger end of recording when VAD detects silence endpoint."""
 		if result.endpoint_reached:
@@ -139,10 +205,13 @@ class VoiceFlowApp:
 			if not self.state_machine.begin_recording():
 				return
 
+			with self._streaming_lock:
+				self._has_typed_any_phrase = False
+
 			self.vad.reset()
 			try:
 				self.recorder.start()
-				self.logger.info("Recording started...")
+				self.logger.info("Recording started (%s mode)...", self.settings.dictation_mode)
 			except Exception:
 				self.logger.exception("Failed to start audio recording.")
 				self.state_machine.cancel()
@@ -162,19 +231,20 @@ class VoiceFlowApp:
 			if not self.state_machine.finish_recording():
 				return
 
-			self.logger.info("Recording finished (%d bytes). Processing pipeline...", len(audio_bytes))
+			self.logger.info("Recording finished (%d bytes). Processing final pipeline...", len(audio_bytes))
 			self._pipeline_executor.submit(self._run_pipeline, audio_bytes)
 
 	def _run_pipeline(self, audio_bytes: bytes) -> None:
-		"""Run STT -> LLM Cleaner -> Injection entirely in memory."""
+		"""Process any remaining audio and finalize dictation."""
 		if not audio_bytes:
-			self.logger.warning("No audio data captured.")
+			if not self._has_typed_any_phrase:
+				self.logger.warning("No audio data captured.")
 			self.state_machine.cancel()
 			return
 
 		# 1. Transcribe (Pass 1)
 		try:
-			self.logger.debug("Transcribing %d bytes of PCM audio...", len(audio_bytes))
+			self.logger.debug("Transcribing %d bytes of remaining PCM audio...", len(audio_bytes))
 			raw_text = self.stt_engine.transcribe(audio_bytes).strip()
 		except Exception:
 			self.logger.exception("STT transcription failed.")
@@ -182,13 +252,28 @@ class VoiceFlowApp:
 			return
 
 		if not raw_text:
-			self.logger.info("Empty transcription; nothing to inject.")
 			self.state_machine.cancel()
 			return
 
-		self.logger.info("Raw transcript: %r", raw_text)
+		self.logger.info("Remaining audio raw transcript: %r", raw_text)
 
-		# 2. LLM Cleanup (Pass 2) with graceful fallback
+		# 2. In streaming mode, clean and type the remaining phrase directly
+		if self.settings.dictation_mode == "streaming":
+			with self._streaming_lock:
+				cleaned_phrase = self._clean_phrase_with_fallback(raw_text)
+				if cleaned_phrase:
+					prefix = " " if self._has_typed_any_phrase else ""
+					to_type = prefix + cleaned_phrase
+					self.logger.info("Final phrase typed: %r", to_type)
+					self.injector.type_text(to_type)
+					self._has_typed_any_phrase = True
+
+			self.state_machine.finish_transcription(needs_cleaning=False)
+			self.state_machine.finish_injection()
+			self.logger.info("Streaming dictation complete. Ready for next dictation.")
+			return
+
+		# Batch Mode: 2. LLM Cleanup (Pass 2) with graceful fallback
 		cleaned_text = self._clean_text_with_fallback(raw_text)
 
 		if not cleaned_text:
@@ -198,7 +283,25 @@ class VoiceFlowApp:
 
 		self.logger.info("Final text to inject: %r", cleaned_text)
 
-		# 3. Text Injection
+		# Batch Mode: 3. Clipboard Text Injection
+		try:
+			self.state_machine.finish_cleaning()
+			self.logger.debug("Injecting text into active context...")
+			self.injector.inject(cleaned_text)
+		except Exception:
+			self.logger.exception("Text injection failed.")
+		finally:
+			self.state_machine.finish_injection()
+			self.logger.info("Pipeline complete. Ready for next dictation.")
+
+		if not cleaned_text:
+			self.logger.info("Empty cleaned text; nothing to inject.")
+			self.state_machine.cancel()
+			return
+
+		self.logger.info("Final text to inject: %r", cleaned_text)
+
+		# Batch Mode: 3. Clipboard Text Injection
 		try:
 			self.state_machine.finish_cleaning()
 			self.logger.debug("Injecting text into active context...")

@@ -19,13 +19,14 @@ class VADResult:
 	energy: float
 	is_speech: bool
 	endpoint_reached: bool
+	pause_reached: bool = False
 
 
 EndpointCallback = Callable[[VADResult], None]
 
 
 class VoiceActivityDetector:
-	"""Detect speech and endpoint a recording after sustained silence."""
+	"""Detect speech, inter-phrase pauses, and endpoint a recording after sustained silence."""
 
 	_SAMPLE_WIDTH_BYTES = 2
 
@@ -38,16 +39,21 @@ class VoiceActivityDetector:
 		self._silence_sample_limit = math.ceil(
 			settings.sample_rate * settings.vad_silence_duration_ms / 1_000
 		)
+		self._pause_sample_limit = math.ceil(
+			settings.sample_rate * settings.pause_threshold_ms / 1_000
+		)
 		self._endpoint_callbacks: list[EndpointCallback] = []
+		self._pause_callbacks: list[EndpointCallback] = []
 		self._pending_byte = b""
 		self._silence_samples = 0
 		self._speech_detected = False
 		self._endpoint_emitted = False
+		self._pause_emitted = False
 		self._lock = threading.RLock()
 		self._logger = get_logger("vad")
 
 	def add_endpoint_callback(self, callback: EndpointCallback) -> Callable[[], None]:
-		"""Register a callback and return a function that unregisters it."""
+		"""Register a callback for full silence endpoint and return unregister function."""
 		with self._lock:
 			self._endpoint_callbacks.append(callback)
 
@@ -58,6 +64,18 @@ class VoiceActivityDetector:
 
 		return remove_callback
 
+	def add_pause_callback(self, callback: EndpointCallback) -> Callable[[], None]:
+		"""Register a callback for inter-phrase pauses and return unregister function."""
+		with self._lock:
+			self._pause_callbacks.append(callback)
+
+		def remove_callback() -> None:
+			with self._lock:
+				if callback in self._pause_callbacks:
+					self._pause_callbacks.remove(callback)
+
+		return remove_callback
+
 	def reset(self) -> None:
 		"""Clear speech and silence history before a new recording begins."""
 		with self._lock:
@@ -65,9 +83,17 @@ class VoiceActivityDetector:
 			self._silence_samples = 0
 			self._speech_detected = False
 			self._endpoint_emitted = False
+			self._pause_emitted = False
+
+	def reset_phrase(self) -> None:
+		"""Reset speech state for the next phrase while keeping recording active."""
+		with self._lock:
+			self._silence_samples = 0
+			self._speech_detected = False
+			self._pause_emitted = False
 
 	def process(self, pcm_audio: bytes) -> VADResult:
-		"""Analyze an ``int16`` PCM chunk and emit an endpoint once when appropriate."""
+		"""Analyze an ``int16`` PCM chunk and emit pause or endpoint events."""
 		with self._lock:
 			pcm_audio = self._pending_byte + pcm_audio
 			self._pending_byte = pcm_audio[-1:] if len(pcm_audio) % self._SAMPLE_WIDTH_BYTES else b""
@@ -78,8 +104,20 @@ class VoiceActivityDetector:
 			if is_speech:
 				self._speech_detected = True
 				self._silence_samples = 0
+				self._pause_emitted = False
 			elif self._speech_detected:
 				self._silence_samples += sample_count
+
+			pause_reached = (
+				self._speech_detected
+				and not self._pause_emitted
+				and self._silence_samples >= self._pause_sample_limit
+			)
+			if pause_reached:
+				self._pause_emitted = True
+				pause_cbs = tuple(self._pause_callbacks)
+			else:
+				pause_cbs = ()
 
 			endpoint_reached = (
 				self._speech_detected
@@ -88,16 +126,25 @@ class VoiceActivityDetector:
 			)
 			if endpoint_reached:
 				self._endpoint_emitted = True
-				callbacks = tuple(self._endpoint_callbacks)
+				endpoint_cbs = tuple(self._endpoint_callbacks)
 			else:
-				callbacks = ()
+				endpoint_cbs = ()
 
-			result = VADResult(energy, is_speech, endpoint_reached)
-		for callback in callbacks:
+			result = VADResult(energy, is_speech, endpoint_reached, pause_reached)
+
+		for callback in pause_cbs:
+			try:
+				callback(result)
+			except Exception:
+				self._logger.exception("VAD pause callback failed.")
+
+		for callback in endpoint_cbs:
 			try:
 				callback(result)
 			except Exception:
 				self._logger.exception("VAD endpoint callback failed.")
+
+		return result
 		return result
 
 	@staticmethod
