@@ -152,8 +152,14 @@ class HotkeyListener:
 		except (KeyError, ValueError) as error:
 			raise ValueError(f"Invalid hotkey: {hotkey!r}.") from error
 
-	@staticmethod
-	def _canonical_key(key: Any) -> Any:
+	def _canonical_key(self, key: Any) -> Any:
+		"""Normalize a raw key press or release into its canonical representation."""
+		if self._listener is not None and hasattr(self._listener, "canonical"):
+			try:
+				return self._listener.canonical(key)
+			except Exception:
+				pass
+
 		if isinstance(key, keyboard.KeyCode) and key.char is not None:
 			return keyboard.KeyCode.from_char(key.char.lower())
 
@@ -164,6 +170,7 @@ class HotkeyListener:
 			keyboard.Key.ctrl_r: keyboard.Key.ctrl,
 			keyboard.Key.shift_l: keyboard.Key.shift,
 			keyboard.Key.shift_r: keyboard.Key.shift,
+			keyboard.Key.space: keyboard.KeyCode.from_vk(32),
 		}
 		return key_aliases.get(key, key)
 
