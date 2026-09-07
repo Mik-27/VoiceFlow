@@ -145,7 +145,6 @@ class VoiceActivityDetector:
 				self._logger.exception("VAD endpoint callback failed.")
 
 		return result
-		return result
 
 	@staticmethod
 	def _calculate_energy(pcm_audio: bytes) -> tuple[float, int]:

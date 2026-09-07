@@ -135,9 +135,11 @@ class VoiceFlowApp:
 	def _on_vad_pause(self, result: VADResult) -> None:
 		"""Trigger incremental phrase processing on natural speech pauses in streaming mode."""
 		if self.settings.dictation_mode == "streaming" and self.state_machine.state is PipelineState.RECORDING:
-			self._streaming_executor.submit(self._process_phrase_chunk)
+			phrase_audio = self.recorder.extract_and_clear_buffer()
+			self.vad.reset_phrase()
+			self._streaming_executor.submit(self._process_phrase_audio, phrase_audio)
 
-	def _process_phrase_chunk(self) -> None:
+	def _process_phrase_audio(self, phrase_audio: bytes) -> None:
 		"""Process an individual spoken phrase chunk with STT and LLM cleanup in real time."""
 		if self.state_machine.state is not PipelineState.RECORDING:
 			return
@@ -145,10 +147,6 @@ class VoiceFlowApp:
 		with self._streaming_lock:
 			if self.state_machine.state is not PipelineState.RECORDING:
 				return
-
-			# Extract only the audio for this phrase and reset recorder buffer
-			phrase_audio = self.recorder.extract_and_clear_buffer()
-			self.vad.reset_phrase()
 
 			# Need at least 0.3s of audio to be a meaningful phrase
 			min_samples = int(self.settings.sample_rate * 2 * 0.3)
@@ -275,24 +273,6 @@ class VoiceFlowApp:
 
 		# Batch Mode: 2. LLM Cleanup (Pass 2) with graceful fallback
 		cleaned_text = self._clean_text_with_fallback(raw_text)
-
-		if not cleaned_text:
-			self.logger.info("Empty cleaned text; nothing to inject.")
-			self.state_machine.cancel()
-			return
-
-		self.logger.info("Final text to inject: %r", cleaned_text)
-
-		# Batch Mode: 3. Clipboard Text Injection
-		try:
-			self.state_machine.finish_cleaning()
-			self.logger.debug("Injecting text into active context...")
-			self.injector.inject(cleaned_text)
-		except Exception:
-			self.logger.exception("Text injection failed.")
-		finally:
-			self.state_machine.finish_injection()
-			self.logger.info("Pipeline complete. Ready for next dictation.")
 
 		if not cleaned_text:
 			self.logger.info("Empty cleaned text; nothing to inject.")
