@@ -30,6 +30,29 @@ def _environment_float(name: str, default: float) -> float:
 		raise ValueError(f"{name} must be a number, got {value!r}.") from error
 
 
+# Edit these values for normal day-to-day VoiceFlow behavior.
+DEFAULT_SETTINGS = {
+	"hotkey": "<ctrl>+<alt>+<space>",
+	"hotkey_mode": "push_to_talk",
+	"dictation_mode": "streaming",
+	"pause_threshold_ms": 700,
+	"sample_rate": 16_000,
+	"channels": 1,
+	"audio_block_duration_ms": 30,
+	"max_recording_duration_seconds": 120,
+	"vad_silence_duration_ms": 1_800,
+	"vad_energy_threshold": 0.01,
+	"stt_backend": "faster_whisper",
+	"llm_backend": "ollama",
+	"llm_timeout_seconds": 5.0,
+	"whisper_model_size": "small.en",
+	"whisper_device": "auto",
+	"whisper_compute_type": "auto",
+	"ollama_model": "qwen2.5:3b",
+	"log_level": "DEBUG",
+}
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
 	"""Runtime settings shared across the local dictation pipeline."""
@@ -50,8 +73,8 @@ class Settings:
 	whisper_model_size: str = "small.en"
 	whisper_device: str = "auto"
 	whisper_compute_type: str = "auto"
-	ollama_model: str = "llama3.2:1b"
-	log_level: str = "INFO"
+	ollama_model: str = "qwen2.5:3b"
+	log_level: str = "DEBUG"
 
 	def __post_init__(self) -> None:
 		if self.hotkey_mode not in {"push_to_talk", "toggle"}:
@@ -75,26 +98,28 @@ class Settings:
 
 
 def load_settings() -> Settings:
-	"""Load settings from ``VOICEFLOW_*`` environment variables."""
+	"""Load code defaults, with optional ``VOICEFLOW_*`` environment overrides."""
 	return Settings(
-		hotkey=os.getenv("VOICEFLOW_HOTKEY", "<ctrl>+<alt>+<space>"),
-		hotkey_mode=os.getenv("VOICEFLOW_HOTKEY_MODE", "push_to_talk").lower(),
-		dictation_mode=os.getenv("VOICEFLOW_DICTATION_MODE", "streaming").lower(),
-		pause_threshold_ms=_environment_int("VOICEFLOW_PAUSE_THRESHOLD_MS", 700),
-		sample_rate=_environment_int("VOICEFLOW_SAMPLE_RATE", 16_000),
-		channels=_environment_int("VOICEFLOW_CHANNELS", 1),
-		audio_block_duration_ms=_environment_int("VOICEFLOW_AUDIO_BLOCK_MS", 30),
-		max_recording_duration_seconds=_environment_int("VOICEFLOW_MAX_RECORDING_SECONDS", 120),
-		vad_silence_duration_ms=_environment_int("VOICEFLOW_VAD_SILENCE_MS", 1800),
-		vad_energy_threshold=_environment_float("VOICEFLOW_VAD_ENERGY_THRESHOLD", 0.01),
-		stt_backend=os.getenv("VOICEFLOW_STT_BACKEND", "faster_whisper"),
-		llm_backend=os.getenv("VOICEFLOW_LLM_BACKEND", "ollama"),
-		llm_timeout_seconds=_environment_float("VOICEFLOW_LLM_TIMEOUT_SECONDS", 5.0),
-		whisper_model_size=os.getenv("VOICEFLOW_WHISPER_MODEL", "small.en"),
-		whisper_device=os.getenv("VOICEFLOW_WHISPER_DEVICE", "auto"),
-		whisper_compute_type=os.getenv("VOICEFLOW_WHISPER_COMPUTE_TYPE", "auto"),
-		ollama_model=os.getenv("VOICEFLOW_OLLAMA_MODEL", "llama3.2:1b"),
-		log_level=os.getenv("VOICEFLOW_LOG_LEVEL", "INFO").upper(),
+		hotkey=os.getenv("VOICEFLOW_HOTKEY", DEFAULT_SETTINGS["hotkey"]),
+		hotkey_mode=os.getenv("VOICEFLOW_HOTKEY_MODE", DEFAULT_SETTINGS["hotkey_mode"]).lower(),
+		dictation_mode=os.getenv("VOICEFLOW_DICTATION_MODE", DEFAULT_SETTINGS["dictation_mode"]).lower(),
+		pause_threshold_ms=_environment_int("VOICEFLOW_PAUSE_THRESHOLD_MS", DEFAULT_SETTINGS["pause_threshold_ms"]),
+		sample_rate=_environment_int("VOICEFLOW_SAMPLE_RATE", DEFAULT_SETTINGS["sample_rate"]),
+		channels=_environment_int("VOICEFLOW_CHANNELS", DEFAULT_SETTINGS["channels"]),
+		audio_block_duration_ms=_environment_int("VOICEFLOW_AUDIO_BLOCK_MS", DEFAULT_SETTINGS["audio_block_duration_ms"]),
+		max_recording_duration_seconds=_environment_int(
+			"VOICEFLOW_MAX_RECORDING_SECONDS", DEFAULT_SETTINGS["max_recording_duration_seconds"]
+		),
+		vad_silence_duration_ms=_environment_int("VOICEFLOW_VAD_SILENCE_MS", DEFAULT_SETTINGS["vad_silence_duration_ms"]),
+		vad_energy_threshold=_environment_float("VOICEFLOW_VAD_ENERGY_THRESHOLD", DEFAULT_SETTINGS["vad_energy_threshold"]),
+		stt_backend=os.getenv("VOICEFLOW_STT_BACKEND", DEFAULT_SETTINGS["stt_backend"]),
+		llm_backend=os.getenv("VOICEFLOW_LLM_BACKEND", DEFAULT_SETTINGS["llm_backend"]),
+		llm_timeout_seconds=_environment_float("VOICEFLOW_LLM_TIMEOUT_SECONDS", DEFAULT_SETTINGS["llm_timeout_seconds"]),
+		whisper_model_size=os.getenv("VOICEFLOW_WHISPER_MODEL", DEFAULT_SETTINGS["whisper_model_size"]),
+		whisper_device=os.getenv("VOICEFLOW_WHISPER_DEVICE", DEFAULT_SETTINGS["whisper_device"]),
+		whisper_compute_type=os.getenv("VOICEFLOW_WHISPER_COMPUTE_TYPE", DEFAULT_SETTINGS["whisper_compute_type"]),
+		ollama_model=os.getenv("VOICEFLOW_OLLAMA_MODEL", DEFAULT_SETTINGS["ollama_model"]),
+		log_level=os.getenv("VOICEFLOW_LOG_LEVEL", DEFAULT_SETTINGS["log_level"]).upper(),
 	)
 
 
