@@ -32,7 +32,7 @@ def _environment_float(name: str, default: float) -> float:
 
 # Edit these values for normal day-to-day VoiceFlow behavior.
 DEFAULT_SETTINGS = {
-	"hotkey": "<ctrl>+<alt>+<space>",
+	"hotkey": "<ctrl>+<shift>",
 	"hotkey_mode": "push_to_talk",
 	"dictation_mode": "streaming",
 	"pause_threshold_ms": 700,
