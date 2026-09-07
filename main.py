@@ -164,32 +164,14 @@ class VoiceFlowApp:
 
 			self.logger.info("Live phrase raw STT: %r", raw_phrase)
 
-			# Fast LLM cleaning on the single phrase
-			cleaned_phrase = self._clean_phrase_with_fallback(raw_phrase)
-			if cleaned_phrase:
+			payload = self._process_transcript_with_fallback(raw_phrase)
+			if payload["type"] == "DICTATION" and payload["text"]:
 				prefix = " " if self._has_typed_any_phrase else ""
-				to_type = prefix + cleaned_phrase
-				self.logger.info("Real-time typing phrase: %r", to_type)
-				self.injector.type_text(to_type)
+				payload["text"] = prefix + payload["text"]
 				self._has_typed_any_phrase = True
 
-	def _clean_phrase_with_fallback(self, raw_text: str) -> str:
-		"""Fast LLM cleanup of an individual phrase with graceful fallback."""
-		def _collect_tokens() -> str:
-			chunks = list(self.llm_cleaner.clean_stream(raw_text))
-			return "".join(chunks).strip()
-
-		cleanup_executor = ThreadPoolExecutor(max_workers=1)
-		try:
-			future = cleanup_executor.submit(_collect_tokens)
-			cleaned = future.result(timeout=self.settings.llm_timeout_seconds)
-			if cleaned:
-				return cleaned
-			return raw_text
-		except Exception:
-			return raw_text
-		finally:
-			cleanup_executor.shutdown(wait=False, cancel_futures=True)
+			self.logger.info("Routing real-time payload: %r", payload)
+			self.injector.handle_payload(payload)
 
 	def _on_vad_endpoint(self, result: VADResult) -> None:
 		"""Automatically trigger end of recording when VAD detects silence endpoint."""
@@ -258,69 +240,60 @@ class VoiceFlowApp:
 		# 2. In streaming mode, clean and type the remaining phrase directly
 		if self.settings.dictation_mode == "streaming":
 			with self._streaming_lock:
-				cleaned_phrase = self._clean_phrase_with_fallback(raw_text)
-				if cleaned_phrase:
+				payload = self._process_transcript_with_fallback(raw_text)
+				if payload["type"] == "DICTATION" and payload["text"]:
 					prefix = " " if self._has_typed_any_phrase else ""
-					to_type = prefix + cleaned_phrase
-					self.logger.info("Final phrase typed: %r", to_type)
-					self.injector.type_text(to_type)
+					payload["text"] = prefix + payload["text"]
 					self._has_typed_any_phrase = True
+
+				self.logger.info("Routing final streaming payload: %r", payload)
+				self.injector.handle_payload(payload)
 
 			self.state_machine.finish_transcription(needs_cleaning=False)
 			self.state_machine.finish_injection()
 			self.logger.info("Streaming dictation complete. Ready for next dictation.")
 			return
 
-		# Batch Mode: 2. LLM Cleanup (Pass 2) with graceful fallback
-		cleaned_text = self._clean_text_with_fallback(raw_text)
-
-		if not cleaned_text:
-			self.logger.info("Empty cleaned text; nothing to inject.")
+		# Batch Mode: 2. LLM classification and payload routing
+		if not self.state_machine.finish_transcription(needs_cleaning=True):
 			self.state_machine.cancel()
 			return
 
-		self.logger.info("Final text to inject: %r", cleaned_text)
+		payload = self._process_transcript_with_fallback(raw_text)
+		if payload["type"] == "DICTATION" and not payload["text"]:
+			self.logger.info("Empty dictation payload; nothing to inject.")
+			self.state_machine.cancel()
+			return
 
-		# Batch Mode: 3. Clipboard Text Injection
 		try:
 			self.state_machine.finish_cleaning()
-			self.logger.debug("Injecting text into active context...")
-			self.injector.inject(cleaned_text)
+			self.logger.info("Routing batch payload: %r", payload)
+			self.injector.handle_payload(payload)
 		except Exception:
 			self.logger.exception("Text injection failed.")
 		finally:
 			self.state_machine.finish_injection()
 			self.logger.info("Pipeline complete. Ready for next dictation.")
 
-	def _clean_text_with_fallback(self, raw_text: str) -> str:
-		"""Clean transcript using LLM with timeout and graceful fallback to raw text."""
-		if not self.state_machine.finish_transcription(needs_cleaning=True):
-			return raw_text
-
-		def _collect_tokens() -> str:
-			chunks = list(self.llm_cleaner.clean_stream(raw_text))
-			return "".join(chunks).strip()
+	def _process_transcript_with_fallback(self, raw_text: str) -> dict[str, str]:
+		"""Classify a transcript with a timeout and dictation fallback."""
 
 		cleanup_executor = ThreadPoolExecutor(max_workers=1)
 		try:
-			future = cleanup_executor.submit(_collect_tokens)
-			cleaned = future.result(timeout=self.settings.llm_timeout_seconds)
-			if cleaned:
-				return cleaned
-			self.logger.warning("LLM cleaner returned empty response; falling back to raw text.")
-			return raw_text
+			future = cleanup_executor.submit(self.llm_cleaner.process_transcript, raw_text)
+			return future.result(timeout=self.settings.llm_timeout_seconds)
 		except FutureTimeoutError:
 			self.logger.warning(
-				"LLM cleaner timed out after %.1fs; falling back to raw transcript.",
+				"LLM cleaner timed out after %.1fs; falling back to raw dictation.",
 				self.settings.llm_timeout_seconds,
 			)
-			return raw_text
+			return {"type": "DICTATION", "text": raw_text}
 		except Exception as error:
 			self.logger.warning(
-				"LLM cleaner failed (%s); falling back to raw transcript.",
+				"LLM cleaner failed (%s); falling back to raw dictation.",
 				error,
 			)
-			return raw_text
+			return {"type": "DICTATION", "text": raw_text}
 		finally:
 			cleanup_executor.shutdown(wait=False, cancel_futures=True)
 

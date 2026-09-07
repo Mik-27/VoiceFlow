@@ -10,6 +10,7 @@ from typing import Protocol
 import pyperclip
 from pynput import keyboard
 
+from core.word_formatter import WordFormatter
 from utils.logger import get_logger
 
 
@@ -40,6 +41,7 @@ class TextInjector:
 		self,
 		clipboard: Clipboard | None = None,
 		key_controller: keyboard.Controller | None = None,
+		formatter: WordFormatter | None = None,
 		restore_delay_seconds: float = 0.05,
 		sleep: Callable[[float], None] = time.sleep,
 	) -> None:
@@ -48,10 +50,23 @@ class TextInjector:
 
 		self._clipboard = clipboard or PyperclipClipboard()
 		self._key_controller = key_controller or keyboard.Controller()
+		self._formatter = formatter or WordFormatter()
 		self._restore_delay_seconds = restore_delay_seconds
 		self._sleep = sleep
 		self._lock = threading.Lock()
 		self._logger = get_logger("injection")
+
+	def handle_payload(self, payload: dict[str, str] | None) -> None:
+		"""Route an LLM payload to Word formatting or clipboard text injection."""
+		if not payload:
+			return
+
+		payload_type = payload.get("type")
+		self._logger.debug("Handling payload of type: %s", payload_type)
+		if payload_type == "COMMAND":
+			self._formatter.execute_formatting(payload.get("action", ""))
+		elif payload_type == "DICTATION":
+			self.inject(payload.get("text", ""))
 
 	def inject(self, text: str) -> None:
 		"""Paste ``text`` into the focused window and restore the prior text clipboard."""
