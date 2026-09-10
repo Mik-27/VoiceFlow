@@ -23,6 +23,10 @@ class FormattingAction(str, Enum):
 	FONT_DECREASE = "FONT_DECREASE"
 	BOLD = "BOLD"
 	ITALIC = "ITALIC"
+	UNDERLINE = "UNDERLINE"
+	ALIGN_LEFT = "ALIGN_LEFT"
+	ALIGN_CENTER = "ALIGN_CENTER"
+	ALIGN_RIGHT = "ALIGN_RIGHT"
 
 
 class TranscriptPayload(BaseModel):
@@ -112,6 +116,14 @@ class OllamaCleaner(BaseLLMCleaner):
 			return {"type": "COMMAND", "action": "BOLD"}
 		if re.search(r"\b(?:italic|italicize|italics)\b", command):
 			return {"type": "COMMAND", "action": "ITALIC"}
+		if re.search(r"\b(?:underline|underlined)\b", command):
+			return {"type": "COMMAND", "action": "UNDERLINE"}
+		if re.search(r"\b(?:align|alignment)\s+(?:to\s+)?(?:the\s+)?left\b", command):
+			return {"type": "COMMAND", "action": "ALIGN_LEFT"}
+		if re.search(r"\b(?:center|centre|align\s+(?:to\s+)?(?:the\s+)?center|align\s+(?:to\s+)?(?:the\s+)?centre)\b", command):
+			return {"type": "COMMAND", "action": "ALIGN_CENTER"}
+		if re.search(r"\b(?:align|alignment)\s+(?:to\s+)?(?:the\s+)?right\b", command):
+			return {"type": "COMMAND", "action": "ALIGN_RIGHT"}
 		if re.search(r"\b(?:increase|enlarge|grow)\b.*\b(?:font|pound|text)(?:\s+size)?\b", command) or re.search(
 			r"\bmake\b.*\b(?:font|pound|text)\b.*\b(?:bigger|larger)\b", command
 		):

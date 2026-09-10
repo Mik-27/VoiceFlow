@@ -36,4 +36,24 @@ class WordFormatter:
                 self.keyboard.tap("i")
             return True
 
+        if cmd == "UNDERLINE":
+            with self.keyboard.pressed(Key.ctrl):
+                self.keyboard.tap("u")
+            return True
+
+        if cmd == "ALIGN_LEFT":
+            with self.keyboard.pressed(Key.ctrl):
+                self.keyboard.tap("l")
+            return True
+
+        if cmd == "ALIGN_CENTER":
+            with self.keyboard.pressed(Key.ctrl):
+                self.keyboard.tap("e")
+            return True
+
+        if cmd == "ALIGN_RIGHT":
+            with self.keyboard.pressed(Key.ctrl):
+                self.keyboard.tap("r")
+            return True
+
         return False
