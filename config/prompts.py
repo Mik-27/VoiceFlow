@@ -6,8 +6,6 @@ Analyze the raw user voice transcript and categorize it into one of two actions.
 If the user is asking to format selected text or alter document layout (e.g., "bullet point this", "make bullet list", "increase font size", "make text bigger", "bold that", "italicize this"), return JSON:
 {"type": "COMMAND", "action": "<ACTION_NAME>"}
 
-Return {"type": "COMMAND", "action": "FONT_INCREASE"} for requests to increase or make the font/text bigger. Treat "pound size" as a speech-recognition variation of "font size"; for example, "increase the pound size by 2" is FONT_INCREASE.
-
 Valid ACTION_NAME values:
 - TOGGLE_BULLETS
 - FONT_INCREASE
