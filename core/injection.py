@@ -10,6 +10,7 @@ from typing import Protocol
 import pyperclip
 from pynput import keyboard
 
+from core.app_launcher import AppLauncher
 from core.word_formatter import WordFormatter
 from utils.logger import get_logger
 
@@ -42,6 +43,7 @@ class TextInjector:
 		clipboard: Clipboard | None = None,
 		key_controller: keyboard.Controller | None = None,
 		formatter: WordFormatter | None = None,
+		app_launcher: AppLauncher | None = None,
 		restore_delay_seconds: float = 0.05,
 		sleep: Callable[[float], None] = time.sleep,
 	) -> None:
@@ -51,13 +53,14 @@ class TextInjector:
 		self._clipboard = clipboard or PyperclipClipboard()
 		self._key_controller = key_controller or keyboard.Controller()
 		self._formatter = formatter or WordFormatter()
+		self._app_launcher = app_launcher or AppLauncher()
 		self._restore_delay_seconds = restore_delay_seconds
 		self._sleep = sleep
 		self._lock = threading.Lock()
 		self._logger = get_logger("injection")
 
 	def handle_payload(self, payload: dict[str, str] | None) -> None:
-		"""Route an LLM payload to Word formatting or native text injection."""
+		"""Route an LLM payload to formatting, app launch, or native text injection."""
 		if not payload:
 			return
 
@@ -65,6 +68,8 @@ class TextInjector:
 		self._logger.debug("Handling payload of type: %s", payload_type)
 		if payload_type == "COMMAND":
 			self._formatter.execute_formatting(payload.get("action", ""))
+		elif payload_type == "APP_COMMAND":
+			self._app_launcher.open_app(payload.get("app", ""))
 		elif payload_type == "DICTATION":
 			self.inject_text(payload.get("text", ""))
 

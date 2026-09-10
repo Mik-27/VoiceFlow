@@ -29,24 +29,40 @@ class FormattingAction(str, Enum):
 	ALIGN_RIGHT = "ALIGN_RIGHT"
 
 
+class ApplicationName(str, Enum):
+	"""Desktop applications that VoiceFlow can launch."""
+
+	WORD = "WORD"
+	EXCEL = "EXCEL"
+	POWERPOINT = "POWERPOINT"
+	CHROME = "CHROME"
+	NOTEPAD = "NOTEPAD"
+	CALCULATOR = "CALCULATOR"
+	VS_CODE = "VS_CODE"
+	TERMINAL = "TERMINAL"
+
+
 class TranscriptPayload(BaseModel):
 	"""Validated LLM classification result for a transcribed phrase."""
 
-	type: Literal["COMMAND", "DICTATION"]
+	type: Literal["COMMAND", "DICTATION", "APP_COMMAND"]
 	action: FormattingAction | None = None
+	app: ApplicationName | None = None
 	text: str | None = None
 
 	@model_validator(mode="after")
 	def validate_intent_fields(self) -> TranscriptPayload:
 		if self.type == "COMMAND" and self.action is None:
 			raise ValueError("COMMAND payloads require an action.")
+		if self.type == "APP_COMMAND" and self.app is None:
+			raise ValueError("APP_COMMAND payloads require an app.")
 		if self.type == "DICTATION" and self.text is None:
 			raise ValueError("DICTATION payloads require text.")
 		return self
 
 
 class BaseLLMCleaner(ABC):
-	"""Classify a transcript as dictation text or a formatting command."""
+	"""Classify a transcript as dictation, formatting, or application command."""
 
 	@abstractmethod
 	def process_transcript(self, raw_text: str) -> dict[str, str]:
@@ -78,6 +94,9 @@ class OllamaCleaner(BaseLLMCleaner):
 			raise TypeError("raw_text must be a string.")
 		if not raw_text.strip():
 			return {"type": "DICTATION", "text": ""}
+		app_payload = self._known_app_payload(raw_text)
+		if app_payload is not None:
+			return app_payload
 		formatting_payload = self._known_formatting_payload(raw_text)
 		if formatting_payload is not None:
 			return formatting_payload
@@ -96,6 +115,28 @@ class OllamaCleaner(BaseLLMCleaner):
 			return payload.model_dump(exclude_none=True, mode="json")
 		except (Exception,):
 			return {"type": "DICTATION", "text": raw_text.strip()}
+
+	@staticmethod
+	def _known_app_payload(raw_text: str) -> dict[str, str] | None:
+		"""Recognize direct supported application launch requests."""
+		command = raw_text.lower()
+		if not re.search(r"\b(?:open|launch|start)\b", command):
+			return None
+
+		app_patterns = {
+			"WORD": r"\b(?:microsoft\s+)?word\b",
+			"EXCEL": r"\b(?:microsoft\s+)?excel\b",
+			"POWERPOINT": r"\b(?:microsoft\s+)?powerpoint\b",
+			"CHROME": r"\b(?:google\s+)?chrome\b",
+			"NOTEPAD": r"\bnotepad\b",
+			"CALCULATOR": r"\b(?:calculator|calc)\b",
+			"VS_CODE": r"\b(?:visual\s+studio\s+code|vs\s+code|vscode)\b",
+			"TERMINAL": r"\b(?:terminal|command\s+prompt|cmd)\b",
+		}
+		for app_name, pattern in app_patterns.items():
+			if re.search(pattern, command):
+				return {"type": "APP_COMMAND", "app": app_name}
+		return None
 
 	@staticmethod
 	def _response_content(response: object) -> str:
