@@ -35,7 +35,7 @@ class PyperclipClipboard:
 
 
 class TextInjector:
-	"""Paste text into the currently focused application and restore its clipboard."""
+	"""Inject text through native typing or clipboard paste into the focused application."""
 
 	def __init__(
 		self,
@@ -57,7 +57,7 @@ class TextInjector:
 		self._logger = get_logger("injection")
 
 	def handle_payload(self, payload: dict[str, str] | None) -> None:
-		"""Route an LLM payload to Word formatting or clipboard text injection."""
+		"""Route an LLM payload to Word formatting or native text injection."""
 		if not payload:
 			return
 
@@ -66,7 +66,7 @@ class TextInjector:
 		if payload_type == "COMMAND":
 			self._formatter.execute_formatting(payload.get("action", ""))
 		elif payload_type == "DICTATION":
-			self.inject(payload.get("text", ""))
+			self.inject_text(payload.get("text", ""))
 
 	def inject(self, text: str) -> None:
 		"""Paste ``text`` into the focused window and restore the prior text clipboard."""
@@ -89,8 +89,8 @@ class TextInjector:
 					except Exception:
 						self._logger.exception("Unable to restore the previous clipboard text.")
 
-	def type_text(self, text: str) -> None:
-		"""Directly type characters at the active cursor position in real-time."""
+	def inject_text(self, text: str) -> None:
+		"""Type ``text`` as native keyboard events at the active cursor position."""
 		if not isinstance(text, str):
 			raise TypeError("text must be a string.")
 		if not text:
@@ -100,7 +100,11 @@ class TextInjector:
 			try:
 				self._key_controller.type(text)
 			except Exception:
-				self._logger.exception("Failed to type streamed text.")
+				self._logger.exception("Failed to inject text through native keyboard events.")
+
+	def type_text(self, text: str) -> None:
+		"""Compatibility alias for native character-based text injection."""
+		self.inject_text(text)
 
 	def _paste(self) -> None:
 		self._key_controller.press(keyboard.Key.ctrl)

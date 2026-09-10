@@ -9,6 +9,7 @@ import threading
 import time
 
 from config import Settings, load_settings, settings as default_settings
+from utils.active_document import ActiveDocumentTarget
 from core.audio_recorder import AudioRecorder
 from core.injection import TextInjector
 from core.llm_cleaner import BaseLLMCleaner, MockLLMCleaner, OllamaCleaner
@@ -54,6 +55,7 @@ class VoiceFlowApp:
 		stt_engine: BaseSTTEngine | None = None,
 		llm_cleaner: BaseLLMCleaner | None = None,
 		injector: TextInjector | None = None,
+		active_document_target: ActiveDocumentTarget | None = None,
 		state_machine: DictationStateMachine | None = None,
 		hotkey_listener: HotkeyListener | None = None,
 	) -> None:
@@ -66,6 +68,7 @@ class VoiceFlowApp:
 		self.stt_engine = stt_engine or create_stt_engine(self.settings)
 		self.llm_cleaner = llm_cleaner or create_llm_cleaner(self.settings)
 		self.injector = injector or TextInjector()
+		self.active_document_target = active_document_target or ActiveDocumentTarget()
 
 		self.hotkey_listener = hotkey_listener or HotkeyListener(
 			hotkey=self.settings.hotkey,
@@ -281,7 +284,11 @@ class VoiceFlowApp:
 		cleanup_executor = ThreadPoolExecutor(max_workers=1)
 		try:
 			future = cleanup_executor.submit(self.llm_cleaner.process_transcript, raw_text)
-			return future.result(timeout=self.settings.llm_timeout_seconds)
+			payload = future.result(timeout=self.settings.llm_timeout_seconds)
+			if payload["type"] == "COMMAND" and not self.active_document_target.is_active():
+				self.logger.info("No supported document cursor is active; typing command transcript as dictation.")
+				return {"type": "DICTATION", "text": raw_text}
+			return payload
 		except FutureTimeoutError:
 			self.logger.warning(
 				"LLM cleaner timed out after %.1fs; falling back to raw dictation.",
