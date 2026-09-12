@@ -45,9 +45,10 @@ class ApplicationName(str, Enum):
 class TranscriptPayload(BaseModel):
 	"""Validated LLM classification result for a transcribed phrase."""
 
-	type: Literal["COMMAND", "DICTATION", "APP_COMMAND"]
+	type: Literal["COMMAND", "DICTATION", "APP_COMMAND", "ACTION_AGENT"]
 	action: FormattingAction | None = None
 	app: ApplicationName | None = None
+	goal: str | None = None
 	text: str | None = None
 
 	@model_validator(mode="after")
@@ -56,13 +57,15 @@ class TranscriptPayload(BaseModel):
 			raise ValueError("COMMAND payloads require an action.")
 		if self.type == "APP_COMMAND" and self.app is None:
 			raise ValueError("APP_COMMAND payloads require an app.")
+		if self.type == "ACTION_AGENT" and self.goal is None:
+			raise ValueError("ACTION_AGENT payloads require a goal.")
 		if self.type == "DICTATION" and self.text is None:
 			raise ValueError("DICTATION payloads require text.")
 		return self
 
 
 class BaseLLMCleaner(ABC):
-	"""Classify a transcript as dictation, formatting, or application command."""
+	"""Classify a transcript as dictation, formatting, application command, or computer use action."""
 
 	@abstractmethod
 	def process_transcript(self, raw_text: str) -> dict[str, str]:
@@ -100,6 +103,9 @@ class OllamaCleaner(BaseLLMCleaner):
 		formatting_payload = self._known_formatting_payload(raw_text)
 		if formatting_payload is not None:
 			return formatting_payload
+		action_payload = self._known_action_payload(raw_text)
+		if action_payload is not None:
+			return action_payload
 
 		try:
 			response = ollama.chat(
@@ -115,6 +121,23 @@ class OllamaCleaner(BaseLLMCleaner):
 			return payload.model_dump(exclude_none=True, mode="json")
 		except (Exception,):
 			return {"type": "DICTATION", "text": raw_text.strip()}
+
+	@staticmethod
+	def _known_action_payload(raw_text: str) -> dict[str, str] | None:
+		"""Recognize direct computer use / click requests before LLM classification."""
+		command = raw_text.strip()
+		match = re.search(
+			r"^(?:please\s+)?(?:click|press|tap|select)\s+(?:on\s+)?(?:the\s+)?(.+)$",
+			command,
+			re.IGNORECASE,
+		)
+		if match:
+			target = match.group(1).strip()
+			formatting_keywords = ["bold", "italic", "underline", "bullet", "align", "font", "size", "bigger", "smaller"]
+			if any(target.lower().startswith(kw) for kw in formatting_keywords):
+				return None
+			return {"type": "ACTION_AGENT", "goal": f"click {target}"}
+		return None
 
 	@staticmethod
 	def _known_app_payload(raw_text: str) -> dict[str, str] | None:
