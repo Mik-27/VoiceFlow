@@ -15,7 +15,7 @@ from core.word_formatter import WordFormatter
 from utils.logger import get_logger
 
 if TYPE_CHECKING:
-	from core.computer_use import OSAtlasAgent
+	from core.computer_use import CUAgent
 
 
 class Clipboard(Protocol):
@@ -47,7 +47,7 @@ class TextInjector:
 		key_controller: keyboard.Controller | None = None,
 		formatter: WordFormatter | None = None,
 		app_launcher: AppLauncher | None = None,
-		computer_use_agent: OSAtlasAgent | None = None,
+		computer_use_agent: CUAgent | None = None,
 		restore_delay_seconds: float = 0.05,
 		sleep: Callable[[float], None] = time.sleep,
 	) -> None:
@@ -78,8 +78,8 @@ class TextInjector:
 		elif payload_type == "ACTION_AGENT":
 			goal = payload.get("goal") or payload.get("text", "")
 			if self._computer_use_agent is None:
-				from core.computer_use import OSAtlasAgent
-				self._computer_use_agent = OSAtlasAgent()
+				from core.computer_use import CUAgent
+				self._computer_use_agent = CUAgent()
 			self._computer_use_agent.execute_action(goal)
 		elif payload_type == "DICTATION":
 			self.inject_text(payload.get("text", ""))
