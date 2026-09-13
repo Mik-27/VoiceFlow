@@ -11,4 +11,5 @@ pyautogui>=0.9.54
 transformers==4.51.3 
 accelerate==1.1.1
 qwen-vl-utils==0.0.8
+bitsandbytes>=0.50.0,<0.51.0
 Pillow>=10.0.0

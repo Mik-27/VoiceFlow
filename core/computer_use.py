@@ -119,7 +119,9 @@ class CUAgent:
 
 		# Quantization config if requested or on low-VRAM GPUs
 		quantization_config = None
-		if load_in_4bit and BitsAndBytesConfig is not None and self.device == "cuda":
+		if load_in_4bit and BitsAndBytesConfig is None:
+			raise ImportError("4-bit GUI-Actor loading requires bitsandbytes. Install it with: pip install bitsandbytes")
+		if load_in_4bit and self.device == "cuda":
 			self.logger.info("Enabling 4-bit quantization for low-VRAM GPU.")
 			quantization_config = BitsAndBytesConfig(
 				load_in_4bit=True,
@@ -135,16 +137,12 @@ class CUAgent:
 
 		if quantization_config is not None:
 			model_kwargs["quantization_config"] = quantization_config
-			model_kwargs["device_map"] = "auto"
+			model_kwargs["device_map"] = "cuda:0"
 		elif self.device == "cuda":
-			model_kwargs["dtype"] = torch_dtype
-			try:
-				import accelerate  # noqa: F401
-				model_kwargs["device_map"] = "auto"
-			except ImportError:
-				pass
+			model_kwargs["torch_dtype"] = torch_dtype
+			model_kwargs["device_map"] = "cuda:0"
 		else:
-			model_kwargs["dtype"] = torch_dtype
+			model_kwargs["torch_dtype"] = torch_dtype
 
 		self.model = Qwen2_5_VLForConditionalGenerationWithPointer.from_pretrained(model_path, **model_kwargs).eval()
 		if "device_map" not in model_kwargs and self.device != "cpu":
